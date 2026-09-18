@@ -1,0 +1,7 @@
+name = "redirects"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+[[kv_namespaces]]
+binding = "DEVICES"
+id = "7d60a545833746c5989d2e8921fd05e4"
