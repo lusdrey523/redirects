@@ -1,21 +1,34 @@
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
     const code = path.slice(1).toUpperCase().trim();
 
+    // Admin routes
     if (path.startsWith("/admin")) {
       return handleAdmin(request, env, path);
     }
 
+    // Home
     if (!code) {
       return new Response(homePage(), {
         headers: { "Content-Type": "text/html; charset=utf-8" }
       });
     }
 
+    // Device redirect logic
     try {
+      // Safety check for missing binding
+      if (!env.DEVICES) {
+        console.error("DEVICES binding is missing");
+        return new Response(errorPage("Binding DEVICES no configurado"), {
+          status: 500,
+          headers: { "Content-Type": "text/html; charset=utf-8" }
+        });
+      }
+
       const raw = await env.DEVICES.get(code);
+
       if (!raw) {
         return new Response(notConfiguredPage(code), {
           status: 404,
@@ -23,12 +36,27 @@ export default {
         });
       }
 
-      const data = JSON.parse(raw);
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (e) {
+        return new Response(notConfiguredPage(code), {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8" }
+        });
+      }
 
       if (data.status === "configured" && data.reviewUrl) {
-        data.scans = (data.scans || 0) + 1;
+        // Update scan counter
+        data.scans = (Number(data.scans) || 0) + 1;
         data.lastUsed = new Date().toISOString();
-        env.DEVICES.put(code, JSON.stringify(data)).catch(() => {});
+
+        try {
+          await env.DEVICES.put(code, JSON.stringify(data));
+        } catch (putErr) {
+          console.error("KV put failed:", putErr);
+        }
+
         return Response.redirect(data.reviewUrl, 302);
       }
 
@@ -36,8 +64,10 @@ export default {
         status: 200,
         headers: { "Content-Type": "text/html; charset=utf-8" }
       });
+
     } catch (err) {
-      return new Response(errorPage(), {
+      console.error("Redirect error:", err);
+      return new Response(errorPage(err.message || "Error desconocido"), {
         status: 500,
         headers: { "Content-Type": "text/html; charset=utf-8" }
       });
@@ -49,6 +79,7 @@ async function handleAdmin(request, env, path) {
   const cookie = request.headers.get("Cookie") || "";
   const isLoggedIn = cookie.includes("breto_admin=1");
 
+  // Logout
   if (path === "/admin/logout") {
     return new Response(null, {
       status: 302,
@@ -59,9 +90,18 @@ async function handleAdmin(request, env, path) {
     });
   }
 
+  // Login POST
   if (path === "/admin" && request.method === "POST") {
     const form = await request.formData();
     const password = form.get("password");
+
+    if (!env.ADMIN_PASSWORD) {
+      return new Response(loginPage(true, "ADMIN_PASSWORD no configurado"), {
+        status: 500,
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+
     if (password === env.ADMIN_PASSWORD) {
       return new Response(null, {
         status: 302,
@@ -71,19 +111,21 @@ async function handleAdmin(request, env, path) {
         }
       });
     }
+
     return new Response(loginPage(true), {
       status: 401,
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
+  // Not logged in
   if (!isLoggedIn) {
     return new Response(loginPage(false), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // Crear nuevo dispositivo
+  // Create new device
   if (path === "/admin/new" && request.method === "POST") {
     const form = await request.formData();
     const newCode = (form.get("code") || "").toUpperCase().trim();
@@ -102,7 +144,7 @@ async function handleAdmin(request, env, path) {
     return Response.redirect("/admin/edit/" + newCode, 302);
   }
 
-  // Guardar configuración
+  // Save configuration
   if (path.startsWith("/admin/edit/") && request.method === "POST") {
     const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
     const form = await request.formData();
@@ -116,13 +158,13 @@ async function handleAdmin(request, env, path) {
     data.reviewUrl = reviewUrl || null;
     data.status = reviewUrl ? "configured" : "pending";
     data.updatedAt = new Date().toISOString();
-    if (!data.scans) data.scans = 0;
+    if (typeof data.scans !== "number") data.scans = 0;
 
     await env.DEVICES.put(deviceCode, JSON.stringify(data));
     return Response.redirect("/admin", 302);
   }
 
-  // Formulario de edición
+  // Edit form
   if (path.startsWith("/admin/edit/")) {
     const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
     const raw = await env.DEVICES.get(deviceCode);
@@ -135,17 +177,18 @@ async function handleAdmin(request, env, path) {
     });
   }
 
-  // Página para crear nuevo
+  // New device page
   if (path === "/admin/new") {
     return new Response(newDevicePage(), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // Lista
+  // Device list
   if (path === "/admin") {
     const list = await env.DEVICES.list();
     const devices = [];
+
     for (const key of list.keys) {
       const raw = await env.DEVICES.get(key.name);
       if (raw) {
@@ -159,11 +202,19 @@ async function handleAdmin(request, env, path) {
             lastUsed: data.lastUsed || null
           });
         } catch (e) {
-          devices.push({ code: key.name, businessName: "Error", status: "error", scans: 0, lastUsed: null });
+          devices.push({
+            code: key.name,
+            businessName: "Error",
+            status: "error",
+            scans: 0,
+            lastUsed: null
+          });
         }
       }
     }
+
     devices.sort((a, b) => a.code.localeCompare(b.code));
+
     return new Response(adminListPage(devices), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
@@ -172,7 +223,10 @@ async function handleAdmin(request, env, path) {
   return Response.redirect("/admin", 302);
 }
 
-function loginPage(error = false) {
+// ==================== PAGES ====================
+
+function loginPage(error = false, customMessage = null) {
+  const errorMsg = customMessage || (error ? "Contraseña incorrecta" : null);
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -195,7 +249,7 @@ function loginPage(error = false) {
   <div class="card">
     <img src="https://i.imgur.com/eHCpKk8.png" alt="Breto's Services" class="logo">
     <h1>Panel de Administración</h1>
-    ${error ? '<div class="error">Contraseña incorrecta</div>' : ''}
+    ${errorMsg ? `<div class="error">${errorMsg}</div>` : ''}
     <form method="POST" action="/admin">
       <input type="password" name="password" placeholder="Contraseña" required autofocus>
       <button type="submit">Entrar</button>
@@ -392,51 +446,58 @@ function notConfiguredPage(code) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Dispositivo pendiente</title>
+  <title>Dispositivo pendiente – Breto's Services</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-    .card{background:#1e293b;border-radius:16px;padding:40px 32px;max-width:420px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)}
-    .logo{max-width:200px;width:100%;margin-bottom:28px}
-    h1{font-size:1.35rem;margin-bottom:16px}
-    .code{font-size:1.75rem;font-weight:700;letter-spacing:3px;background:#0f172a;color:#38bdf8;padding:14px 24px;border-radius:10px;display:inline-block;margin:8px 0 20px}
-    p{color:#94a3b8;font-size:.95rem;line-height:1.5}
-    .footer{margin-top:28px;font-size:.8rem;color:#64748b}
+    .card{background:#1e293b;border-radius:16px;padding:40px 28px;max-width:420px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)}
+    .logo{max-width:180px;width:100%;margin-bottom:28px}
+    h1{font-size:1.4rem;font-weight:700;margin-bottom:12px;line-height:1.3}
+    .subtitle{color:#94a3b8;font-size:.95rem;line-height:1.5;margin-bottom:28px}
+    .code-label{font-size:.75rem;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+    .code{font-size:1.8rem;font-weight:700;letter-spacing:3px;background:#0f172a;color:#38bdf8;padding:14px 24px;border-radius:10px;display:inline-block;margin-bottom:28px}
+    .owner-text{font-size:.9rem;color:#94a3b8;margin-bottom:16px}
+    .btn{display:inline-block;padding:14px 28px;background:#38bdf8;color:#0f172a;text-decoration:none;border-radius:10px;font-weight:600;font-size:1rem}
+    .footer{margin-top:32px;font-size:.8rem;color:#64748b}
   </style>
 </head>
 <body>
   <div class="card">
-    <img src="https://i.imgur.com/eHCpKk8.png" class="logo">
-    <h1>Dispositivo pendiente</h1>
+    <img src="https://i.imgur.com/eHCpKk8.png" class="logo" alt="Breto's Services">
+    <h1>Este dispositivo todavía no está configurado</h1>
+    <p class="subtitle">En cuanto su propietario lo configure, este enlace te llevará directamente a dejar una reseña en Google.</p>
+    <div class="code-label">Código del producto</div>
     <div class="code">${code}</div>
-    <p>Este dispositivo aún no ha sido configurado.</p>
-    <p class="footer">Contacta a Breto's Services para activarlo</p>
+    <p class="owner-text">¿Eres el propietario de este dispositivo?</p>
+    <a href="/admin" class="btn">Configúralo desde tu panel</a>
+    <p class="footer">Breto's Services · Tarjetas de reseñas Google + NFC/QR</p>
   </div>
 </body>
 </html>`;
 }
 
-function errorPage() {
+function errorPage(message = "Error temporal") {
   return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Error</title>
+  <title>Error – Breto's Services</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
     .card{background:#1e293b;border-radius:16px;padding:40px 32px;max-width:420px;width:100%;text-align:center}
     .logo{max-width:180px;width:100%;margin-bottom:24px}
     h1{font-size:1.35rem;margin-bottom:12px}
-    p{color:#94a3b8}
+    p{color:#94a3b8;font-size:.9rem}
   </style>
 </head>
 <body>
   <div class="card">
     <img src="https://i.imgur.com/eHCpKk8.png" class="logo">
     <h1>Error temporal</h1>
-    <p>Intenta de nuevo en unos segundos.</p>
+    <p>${message}</p>
+    <p style="margin-top:16px">Intenta de nuevo en unos segundos.</p>
   </div>
 </body>
 </html>`;
