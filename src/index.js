@@ -95,7 +95,7 @@ async function handleAdmin(request, env, path) {
         return new Response(null, {
           status: 302,
           headers: {
-            "Location": origin + "/admin/dispositivos",
+            "Location": origin + "/admin/inicio",
             "Set-Cookie": "breto_admin=1; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400"
           }
         });
@@ -115,6 +115,14 @@ async function handleAdmin(request, env, path) {
   if (!isLoggedIn) {
     return new Response(loginPage(false), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  }
+
+  // Default /admin -> Inicio
+  if (path === "/admin") {
+    return new Response(null, {
+      status: 302,
+      headers: { "Location": origin + "/admin/inicio" }
     });
   }
 
@@ -197,7 +205,7 @@ async function handleAdmin(request, env, path) {
     });
   }
 
-  if (path === "/admin/dispositivos" || path === "/admin") {
+  if (path === "/admin/dispositivos") {
     try {
       const list = await env.DEVICES.list();
       const devices = [];
@@ -267,13 +275,13 @@ async function handleAdmin(request, env, path) {
 
   return new Response(null, {
     status: 302,
-    headers: { "Location": origin + "/admin/dispositivos" }
+    headers: { "Location": origin + "/admin/inicio" }
   });
 }
 
 /* ==================== DESIGN SYSTEM ==================== */
 
-function sidebar(active = "dispositivos") {
+function sidebar(active = "inicio") {
   const items = [
     { id: "inicio", label: "Inicio", href: "/admin/inicio" },
     { id: "dispositivos", label: "Dispositivos", href: "/admin/dispositivos" },
@@ -286,12 +294,17 @@ function sidebar(active = "dispositivos") {
   ];
 
   return `
-  <aside class="sidebar">
-    <div class="sidebar-top">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
       <div class="brand">
         <img src="https://i.imgur.com/eHCpKk8.png" alt="Breto's Services">
         <span class="brand-sub">Panel Admin</span>
       </div>
+      <button class="hamburger" id="hamburger" aria-label="Menú" type="button">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+    <div class="sidebar-body" id="sidebar-body">
       <nav class="nav">
         ${items.map(item => `
           <a href="${item.href}" class="nav-link ${active === item.id ? 'active' : ''} ${item.soon ? 'soon' : ''}">
@@ -300,11 +313,20 @@ function sidebar(active = "dispositivos") {
           </a>
         `).join('')}
       </nav>
-    </div>
-    <div class="sidebar-bottom">
       <a href="/admin/logout" class="logout">Cerrar sesión</a>
     </div>
-  </aside>`;
+  </aside>
+  <script>
+    (function(){
+      var btn = document.getElementById('hamburger');
+      var body = document.getElementById('sidebar-body');
+      if (!btn || !body) return;
+      btn.addEventListener('click', function(){
+        body.classList.toggle('open');
+        btn.classList.toggle('open');
+      });
+    })();
+  </script>`;
 }
 
 function baseStyles() {
@@ -325,7 +347,7 @@ function baseStyles() {
     --danger: #ef4444;
     --danger-bg: rgba(239,68,68,.12);
     --radius: 12px;
-    --font: 'Inter', system-ui, -apple-system, sans-serif;
+    --font: system-ui, -apple-system, sans-serif;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   body{
@@ -337,7 +359,7 @@ function baseStyles() {
     -webkit-font-smoothing:antialiased;
   }
 
-  /* Sidebar */
+  /* Sidebar desktop */
   .sidebar{
     width:220px;
     background:var(--panel);
@@ -349,11 +371,17 @@ function baseStyles() {
     height:100vh;
     z-index:50;
   }
-  .sidebar-top{flex:1;overflow-y:auto;padding:20px 14px}
-  .brand{text-align:center;margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid var(--border)}
-  .brand img{max-width:130px;display:block;margin:0 auto 8px}
+  .sidebar-header{padding:20px 14px 12px;border-bottom:1px solid var(--border)}
+  .brand{text-align:center}
+  .brand img{max-width:130px;display:block;margin:0 auto 6px}
   .brand-sub{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
-  .nav{display:flex;flex-direction:column;gap:2px}
+  .hamburger{display:none;background:none;border:none;cursor:pointer;padding:8px;flex-direction:column;gap:5px}
+  .hamburger span{display:block;width:22px;height:2px;background:var(--text);border-radius:2px;transition:all .2s}
+  .hamburger.open span:nth-child(1){transform:translateY(7px) rotate(45deg)}
+  .hamburger.open span:nth-child(2){opacity:0}
+  .hamburger.open span:nth-child(3){transform:translateY(-7px) rotate(-45deg)}
+  .sidebar-body{flex:1;display:flex;flex-direction:column;padding:14px;overflow-y:auto}
+  .nav{display:flex;flex-direction:column;gap:2px;flex:1}
   .nav-link{
     display:flex;align-items:center;justify-content:space-between;
     padding:10px 12px;border-radius:8px;
@@ -364,14 +392,12 @@ function baseStyles() {
   .nav-link.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
   .nav-link.soon{opacity:.45;pointer-events:none}
   .nav-link em{font-style:normal;font-size:.65rem;background:var(--panel-2);padding:2px 6px;border-radius:6px;color:var(--muted)}
-  .sidebar-bottom{padding:14px;border-top:1px solid var(--border)}
   .logout{
-    display:block;text-align:center;
+    display:block;text-align:center;margin-top:12px;
     padding:10px;border-radius:8px;
     background:var(--danger-bg);color:var(--danger);
     text-decoration:none;font-size:.85rem;font-weight:600;
     border:1px solid transparent;
-    transition:all .15s;
   }
   .logout:hover{border-color:var(--danger);background:rgba(239,68,68,.2)}
 
@@ -381,7 +407,6 @@ function baseStyles() {
   .page-header h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em}
   .page-header p{color:var(--muted);font-size:.9rem;margin-top:4px}
 
-  /* Cards */
   .card{
     background:var(--panel);
     border:1px solid var(--border);
@@ -398,18 +423,15 @@ function baseStyles() {
   .stat-label{font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
   .stat-value{font-size:1.6rem;font-weight:700}
 
-  /* Table */
   table{width:100%;border-collapse:collapse;font-size:.875rem}
   th,td{padding:12px 10px;text-align:left;border-bottom:1px solid var(--border)}
   th{color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
   tr:last-child td{border-bottom:none}
 
-  /* Badges */
   .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:600}
   .badge-ok{background:var(--ok-bg);color:var(--ok)}
   .badge-pending{background:var(--warn-bg);color:var(--warn)}
 
-  /* Buttons */
   .btn{
     display:inline-flex;align-items:center;justify-content:center;
     padding:8px 14px;border-radius:8px;font-size:.85rem;font-weight:600;
@@ -422,7 +444,6 @@ function baseStyles() {
   .btn-block{width:100%;padding:13px}
   .actions{display:flex;gap:10px;margin-top:8px}
 
-  /* Forms */
   label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:6px;font-weight:500}
   input,textarea{
     width:100%;padding:11px 14px;border-radius:8px;
@@ -433,19 +454,43 @@ function baseStyles() {
   textarea{min-height:90px;resize:vertical}
   .hint{font-size:.78rem;color:var(--muted);margin-top:-10px;margin-bottom:16px}
   .code-tag{font-size:1.05rem;color:var(--accent);font-weight:700;letter-spacing:1px;margin-bottom:20px}
-
-  /* Empty / placeholder */
   .empty{text-align:center;padding:48px 20px;color:var(--muted)}
   .empty h2{font-size:1.2rem;color:var(--text);margin-bottom:8px}
 
+  /* ===== MOBILE: hamburger ===== */
   @media(max-width:768px){
     body{flex-direction:column}
-    .sidebar{width:100%;height:auto;position:relative;border-right:none}
-    .sidebar-top{padding:14px}
-    .brand{margin-bottom:12px;padding-bottom:12px}
-    .nav{flex-direction:row;flex-wrap:wrap;gap:4px}
-    .nav-link{flex:1 1 40%;justify-content:center;font-size:.8rem;padding:8px}
-    .nav-link em{display:none}
+    .sidebar{
+      width:100%;
+      height:auto;
+      position:relative;
+      border-right:none;
+    }
+    .sidebar-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:12px 16px;
+    }
+    .brand{text-align:left;display:flex;align-items:center;gap:10px}
+    .brand img{max-width:100px;margin:0}
+    .brand-sub{display:none}
+    .hamburger{display:flex}
+
+    /* Menu oculto por defecto en móvil */
+    .sidebar-body{
+      display:none;
+      padding:8px 14px 16px;
+      border-top:1px solid var(--border);
+    }
+    .sidebar-body.open{
+      display:flex;
+    }
+
+    .nav{flex-direction:column;gap:2px}
+    .nav-link{font-size:.9rem;padding:11px 12px}
+    .nav-link em{display:inline}
+
     .main{margin-left:0;padding:16px}
     .stats{grid-template-columns:1fr 1fr}
   }
@@ -471,7 +516,6 @@ function loginPage(error = false, customMessage = null) {
     }
     .login-card img{max-width:180px;margin-bottom:8px}
     .login-card .sub{font-size:.8rem;color:var(--muted);margin-bottom:28px;text-transform:uppercase;letter-spacing:.06em}
-    .login-card h1{font-size:1.2rem;margin-bottom:24px}
     .err{background:var(--danger-bg);color:var(--danger);padding:10px;border-radius:8px;margin-bottom:16px;font-size:.85rem}
   </style>
 </head>
