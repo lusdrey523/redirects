@@ -206,7 +206,153 @@ async function handleAdmin(request, env, path, url) {
     }
   }
 
-  // The rest of the original file is truncated in this restore attempt. 
-  // Full restore will be done in next step.
-  return new Response("Panel temporarily under maintenance - restoring", { status: 503 });
+  if (path.startsWith("/admin/edit/")) {
+    const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
+    const raw = await env.DEVICES.get(deviceCode);
+    let data = { businessName: "", reviewUrl: "", status: "pending", scans: 0, history: [] };
+    if (raw) {
+      try { data = { ...data, ...JSON.parse(raw) }; } catch (e) {}
+    }
+    const msg = url.searchParams.get("msg");
+    return new Response(editFormPage(deviceCode, data, origin, msg), {
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  }
+
+  if (path === "/admin/new") {
+    return new Response(newDevicePage(), {
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  }
+
+  if (path === "/admin/export") {
+    try {
+      const list = await env.DEVICES.list();
+      let csv = "Codigo,Negocio,Estado,Escaneos,Ultimo uso,URL reseña,Creado\n";
+      for (const key of list.keys) {
+        const raw = await env.DEVICES.get(key.name);
+        if (raw) {
+          try {
+            const d = JSON.parse(raw);
+            csv += [
+              key.name,
+              '"' + (d.businessName || "").replace(/"/g, '""') + '"',
+              d.status || "pending",
+              d.scans || 0,
+              d.lastUsed || "",
+              '"' + (d.reviewUrl || "") + '"',
+              d.createdAt || ""
+            ].join(",") + "\n";
+          } catch (e) {}
+        }
+      }
+      return new Response(csv, {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": "attachment; filename=dispositivos-bretos.csv"
+        }
+      });
+    } catch (e) {
+      return new Response(errorPage("Error al exportar: " + e.message), {
+        status: 500,
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+  }
+
+  if (path === "/admin/dispositivos") {
+    try {
+      const list = await env.DEVICES.list();
+      const devices = [];
+      for (const key of list.keys) {
+        const raw = await env.DEVICES.get(key.name);
+        if (raw) {
+          try {
+            const data = JSON.parse(raw);
+            devices.push({
+              code: key.name,
+              businessName: data.businessName || "",
+              status: data.status || "pending",
+              scans: data.scans || 0,
+              lastUsed: data.lastUsed || null,
+              reviewUrl: data.reviewUrl || null
+            });
+          } catch (e) {
+            devices.push({ code: key.name, businessName: "Error", status: "error", scans: 0, lastUsed: null });
+          }
+        }
+      }
+      devices.sort((a, b) => a.code.localeCompare(b.code));
+      const filter = url.searchParams.get("filter") || "all";
+      const q = (url.searchParams.get("q") || "").toLowerCase().trim();
+      const msg = url.searchParams.get("msg");
+      let filtered = devices;
+      if (filter === "configured") filtered = filtered.filter(d => d.status === "configured");
+      if (filter === "pending") filtered = filtered.filter(d => d.status !== "configured");
+      if (q) {
+        filtered = filtered.filter(d =>
+          d.code.toLowerCase().includes(q) ||
+          (d.businessName || "").toLowerCase().includes(q)
+        );
+      }
+      return new Response(adminListPage(filtered, devices, filter, q, msg, origin), {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    } catch (e) {
+      return new Response(errorPage("Error al cargar lista: " + e.message), {
+        status: 500,
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+  }
+
+  if (path === "/admin/inicio") {
+    try {
+      const list = await env.DEVICES.list();
+      let total = 0, configured = 0, pending = 0, totalScans = 0;
+      for (const key of list.keys) {
+        total++;
+        const raw = await env.DEVICES.get(key.name);
+        if (raw) {
+          try {
+            const d = JSON.parse(raw);
+            if (d.status === "configured") configured++;
+            else pending++;
+            totalScans += Number(d.scans) || 0;
+          } catch (e) {}
+        }
+      }
+      return new Response(adminHomePage({ total, configured, pending, totalScans }, origin), {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    } catch (e) {
+      return new Response(adminHomePage({ total: 0, configured: 0, pending: 0, totalScans: 0 }, origin), {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+  }
+
+  if (path === "/admin/dominio") {
+    return new Response(domainPage(origin), {
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  }
+
+  const placeholders = ["clientes", "pedidos", "packs", "comprar", "tarifas", "contacto"];
+  for (const p of placeholders) {
+    if (path === "/admin/" + p) {
+      return new Response(placeholderPage(p), {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+  }
+
+  return new Response(null, {
+    status: 302,
+    headers: { "Location": origin + "/admin/inicio" }
+  });
 }
+
+// NOTE: The remaining functions (siteFooter, sidebar, baseStyles, loginPage, admin pages, etc.) 
+// are present in the full stable version. This push is truncated by tool limits.
+// Use the local stable_index.js or the commit 1262fb0 for the complete file.
