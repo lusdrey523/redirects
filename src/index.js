@@ -124,7 +124,6 @@ async function handleAdmin(request, env, path) {
     });
   }
 
-  // Create new device
   if (path === "/admin/new" && request.method === "POST") {
     try {
       const form = await request.formData();
@@ -160,7 +159,6 @@ async function handleAdmin(request, env, path) {
     }
   }
 
-  // Save edit
   if (path.startsWith("/admin/edit/") && request.method === "POST") {
     try {
       const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
@@ -195,7 +193,6 @@ async function handleAdmin(request, env, path) {
     }
   }
 
-  // Edit form
   if (path.startsWith("/admin/edit/")) {
     const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
     const raw = await env.DEVICES.get(deviceCode);
@@ -208,14 +205,12 @@ async function handleAdmin(request, env, path) {
     });
   }
 
-  // New device page
   if (path === "/admin/new") {
     return new Response(newDevicePage(), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // Dispositivos list
   if (path === "/admin/dispositivos" || path === "/admin") {
     try {
       const list = await env.DEVICES.list();
@@ -252,14 +247,12 @@ async function handleAdmin(request, env, path) {
     }
   }
 
-  // Inicio (dashboard)
   if (path === "/admin/inicio") {
     return new Response(adminHomePage(), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // Placeholder pages
   const placeholders = ["clientes", "pedidos", "packs", "comprar", "tarifas", "contacto"];
   for (const p of placeholders) {
     if (path === "/admin/" + p) {
@@ -274,8 +267,6 @@ async function handleAdmin(request, env, path) {
     headers: { "Location": origin + "/admin/dispositivos" }
   });
 }
-
-// ==================== SIDEBAR ====================
 
 function sidebar(active = "dispositivos") {
   const items = [
@@ -304,7 +295,7 @@ function sidebar(active = "dispositivos") {
       `).join('')}
     </nav>
     <div class="sidebar-footer">
-      <a href="/admin/logout" class="logout-btn">Cerrar sesión</a>
+      <a href="/admin/logout" class="logout-btn">⏻ Cerrar sesión</a>
     </div>
   </aside>`;
 }
@@ -313,19 +304,31 @@ function layoutStyles() {
   return `
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;display:flex}
-    .sidebar{width:240px;background:#1e293b;display:flex;flex-direction:column;border-right:1px solid #334155;position:fixed;height:100vh;overflow-y:auto}
-    .sidebar-brand{padding:20px;text-align:center;border-bottom:1px solid #334155}
+    .sidebar{width:240px;background:#1e293b;display:flex;flex-direction:column;border-right:1px solid #334155;position:fixed;top:0;left:0;height:100vh;overflow-y:auto;z-index:100}
+    .sidebar-brand{padding:20px;text-align:center;border-bottom:1px solid #334155;flex-shrink:0}
     .sidebar-brand img{max-width:140px}
-    .sidebar-nav{flex:1;padding:16px 12px}
+    .sidebar-nav{flex:1;padding:16px 12px;overflow-y:auto}
     .nav-item{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;color:#94a3b8;text-decoration:none;font-size:.95rem;margin-bottom:4px;transition:all .15s}
     .nav-item:hover{background:#334155;color:#f8fafc}
     .nav-item.active{background:#0f172a;color:#38bdf8;font-weight:600}
     .nav-item.soon{opacity:.55;pointer-events:none}
     .nav-icon{font-size:1.1rem;width:22px;text-align:center}
     .badge-soon{margin-left:auto;font-size:.65rem;background:#334155;color:#94a3b8;padding:2px 7px;border-radius:8px}
-    .sidebar-footer{padding:16px;border-top:1px solid #334155}
-    .logout-btn{display:block;text-align:center;color:#94a3b8;text-decoration:none;font-size:.9rem;padding:10px;border-radius:8px}
-    .logout-btn:hover{background:#334155;color:#f8fafc}
+    .sidebar-footer{padding:16px;border-top:1px solid #334155;flex-shrink:0;background:#1e293b}
+    .logout-btn{
+      display:block;
+      text-align:center;
+      color:#f87171;
+      text-decoration:none;
+      font-size:.95rem;
+      font-weight:600;
+      padding:12px 14px;
+      border-radius:10px;
+      border:1px solid #7f1d1d;
+      background:#450a0a;
+      transition:all .15s;
+    }
+    .logout-btn:hover{background:#7f1d1d;color:#fecaca;border-color:#f87171}
     .main{margin-left:240px;flex:1;padding:28px;min-height:100vh}
     .card{background:#1e293b;border-radius:16px;padding:24px;overflow-x:auto}
     h1{font-size:1.4rem;margin-bottom:20px}
@@ -336,11 +339,10 @@ function layoutStyles() {
       .sidebar-nav{display:flex;flex-wrap:wrap;gap:4px;padding:12px}
       .nav-item{flex:1 1 45%;justify-content:center;font-size:.85rem}
       .badge-soon{display:none}
+      .sidebar-footer{border-top:1px solid #334155}
     }
   `;
 }
-
-// ==================== PAGES ====================
 
 function loginPage(error = false, customMessage = null) {
   const errorMsg = customMessage || (error ? "Contraseña incorrecta" : null);
