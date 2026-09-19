@@ -4,23 +4,18 @@ export default {
     const path = url.pathname;
     const code = path.slice(1).toUpperCase().trim();
 
-    // Admin routes
     if (path.startsWith("/admin")) {
       return handleAdmin(request, env, path);
     }
 
-    // Home
     if (!code) {
       return new Response(homePage(), {
         headers: { "Content-Type": "text/html; charset=utf-8" }
       });
     }
 
-    // Device redirect logic
     try {
-      // Safety check for missing binding
       if (!env.DEVICES) {
-        console.error("DEVICES binding is missing");
         return new Response(errorPage("Binding DEVICES no configurado"), {
           status: 500,
           headers: { "Content-Type": "text/html; charset=utf-8" }
@@ -47,14 +42,13 @@ export default {
       }
 
       if (data.status === "configured" && data.reviewUrl) {
-        // Update scan counter
         data.scans = (Number(data.scans) || 0) + 1;
         data.lastUsed = new Date().toISOString();
 
         try {
           await env.DEVICES.put(code, JSON.stringify(data));
-        } catch (putErr) {
-          console.error("KV put failed:", putErr);
+        } catch (e) {
+          console.error("KV put error:", e);
         }
 
         return Response.redirect(data.reviewUrl, 302);
@@ -67,7 +61,7 @@ export default {
 
     } catch (err) {
       console.error("Redirect error:", err);
-      return new Response(errorPage(err.message || "Error desconocido"), {
+      return new Response(errorPage(String(err.message || err)), {
         status: 500,
         headers: { "Content-Type": "text/html; charset=utf-8" }
       });
@@ -78,13 +72,14 @@ export default {
 async function handleAdmin(request, env, path) {
   const cookie = request.headers.get("Cookie") || "";
   const isLoggedIn = cookie.includes("breto_admin=1");
+  const origin = new URL(request.url).origin;
 
   // Logout
   if (path === "/admin/logout") {
     return new Response(null, {
       status: 302,
       headers: {
-        "Location": "/admin",
+        "Location": origin + "/admin",
         "Set-Cookie": "breto_admin=; Path=/; Max-Age=0"
       }
     });
@@ -92,92 +87,144 @@ async function handleAdmin(request, env, path) {
 
   // Login POST
   if (path === "/admin" && request.method === "POST") {
-    const form = await request.formData();
-    const password = form.get("password");
+    try {
+      const form = await request.formData();
+      const password = form.get("password");
 
-    if (!env.ADMIN_PASSWORD) {
-      return new Response(loginPage(true, "ADMIN_PASSWORD no configurado"), {
+      if (!env.ADMIN_PASSWORD) {
+        return new Response(loginPage(true, "ADMIN_PASSWORD no configurado"), {
+          status: 500,
+          headers: { "Content-Type": "text/html; charset=utf-8" }
+        });
+      }
+
+      if (password === env.ADMIN_PASSWORD) {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            "Location": origin + "/admin",
+            "Set-Cookie": "breto_admin=1; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400"
+          }
+        });
+      }
+
+      return new Response(loginPage(true), {
+        status: 401,
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    } catch (e) {
+      return new Response(loginPage(true, "Error al procesar login"), {
         status: 500,
         headers: { "Content-Type": "text/html; charset=utf-8" }
       });
     }
-
-    if (password === env.ADMIN_PASSWORD) {
-      return new Response(null, {
-        status: 302,
-        headers: {
-          "Location": "/admin",
-          "Set-Cookie": "breto_admin=1; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400"
-        }
-      });
-    }
-
-    return new Response(loginPage(true), {
-      status: 401,
-      headers: { "Content-Type": "text/html; charset=utf-8" }
-    });
   }
 
-  // Not logged in
   if (!isLoggedIn) {
     return new Response(loginPage(false), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // Create new device
+  // ========== CREATE NEW DEVICE ==========
   if (path === "/admin/new" && request.method === "POST") {
-    const form = await request.formData();
-    const newCode = (form.get("code") || "").toUpperCase().trim();
-    if (!newCode) return Response.redirect("/admin", 302);
+    try {
+      const form = await request.formData();
+      const newCode = (form.get("code") || "").toUpperCase().trim();
 
-    const exists = await env.DEVICES.get(newCode);
-    if (!exists) {
-      await env.DEVICES.put(newCode, JSON.stringify({
-        status: "pending",
-        businessName: null,
-        reviewUrl: null,
-        scans: 0,
-        createdAt: new Date().toISOString()
-      }));
+      if (!newCode) {
+        return new Response(null, {
+          status: 302,
+          headers: { "Location": origin + "/admin" }
+        });
+      }
+
+      const exists = await env.DEVICES.get(newCode);
+      if (!exists) {
+        await env.DEVICES.put(newCode, JSON.stringify({
+          status: "pending",
+          businessName: null,
+          reviewUrl: null,
+          scans: 0,
+          createdAt: new Date().toISOString()
+        }));
+      }
+
+      // Redirect limpio (absoluto) para evitar Error 1101
+      return new Response(null, {
+        status: 302,
+        headers: { "Location": origin + "/admin/edit/" + newCode }
+      });
+
+    } catch (e) {
+      console.error("Create device error:", e);
+      return new Response(errorPage("Error al crear dispositivo: " + e.message), {
+        status: 500,
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
     }
-    return Response.redirect("/admin/edit/" + newCode, 302);
   }
 
-  // Save configuration
+  // ========== SAVE EDIT ==========
   if (path.startsWith("/admin/edit/") && request.method === "POST") {
-    const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
-    const form = await request.formData();
-    const businessName = (form.get("businessName") || "").trim();
-    const reviewUrl = (form.get("reviewUrl") || "").trim();
+    try {
+      const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
+      const form = await request.formData();
+      const businessName = (form.get("businessName") || "").trim();
+      const reviewUrl = (form.get("reviewUrl") || "").trim();
 
-    const existingRaw = await env.DEVICES.get(deviceCode);
-    let data = existingRaw ? JSON.parse(existingRaw) : {};
+      const existingRaw = await env.DEVICES.get(deviceCode);
+      let data = {};
 
-    data.businessName = businessName || null;
-    data.reviewUrl = reviewUrl || null;
-    data.status = reviewUrl ? "configured" : "pending";
-    data.updatedAt = new Date().toISOString();
-    if (typeof data.scans !== "number") data.scans = 0;
+      if (existingRaw) {
+        try {
+          data = JSON.parse(existingRaw);
+        } catch (e) {
+          data = {};
+        }
+      }
 
-    await env.DEVICES.put(deviceCode, JSON.stringify(data));
-    return Response.redirect("/admin", 302);
+      data.businessName = businessName || null;
+      data.reviewUrl = reviewUrl || null;
+      data.status = reviewUrl ? "configured" : "pending";
+      data.updatedAt = new Date().toISOString();
+      if (typeof data.scans !== "number") data.scans = 0;
+
+      await env.DEVICES.put(deviceCode, JSON.stringify(data));
+
+      // Redirect limpio (absoluto) para evitar Error 1101
+      return new Response(null, {
+        status: 302,
+        headers: { "Location": origin + "/admin" }
+      });
+
+    } catch (e) {
+      console.error("Save device error:", e);
+      return new Response(errorPage("Error al guardar: " + e.message), {
+        status: 500,
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
   }
 
-  // Edit form
+  // Edit form (GET)
   if (path.startsWith("/admin/edit/")) {
     const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
     const raw = await env.DEVICES.get(deviceCode);
     let data = { businessName: "", reviewUrl: "", status: "pending", scans: 0 };
+
     if (raw) {
-      try { data = { ...data, ...JSON.parse(raw) }; } catch (e) {}
+      try {
+        data = { ...data, ...JSON.parse(raw) };
+      } catch (e) {}
     }
+
     return new Response(editFormPage(deviceCode, data), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // New device page
+  // New device page (GET)
   if (path === "/admin/new") {
     return new Response(newDevicePage(), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
@@ -186,41 +233,51 @@ async function handleAdmin(request, env, path) {
 
   // Device list
   if (path === "/admin") {
-    const list = await env.DEVICES.list();
-    const devices = [];
+    try {
+      const list = await env.DEVICES.list();
+      const devices = [];
 
-    for (const key of list.keys) {
-      const raw = await env.DEVICES.get(key.name);
-      if (raw) {
-        try {
-          const data = JSON.parse(raw);
-          devices.push({
-            code: key.name,
-            businessName: data.businessName || "—",
-            status: data.status || "pending",
-            scans: data.scans || 0,
-            lastUsed: data.lastUsed || null
-          });
-        } catch (e) {
-          devices.push({
-            code: key.name,
-            businessName: "Error",
-            status: "error",
-            scans: 0,
-            lastUsed: null
-          });
+      for (const key of list.keys) {
+        const raw = await env.DEVICES.get(key.name);
+        if (raw) {
+          try {
+            const data = JSON.parse(raw);
+            devices.push({
+              code: key.name,
+              businessName: data.businessName || "—",
+              status: data.status || "pending",
+              scans: data.scans || 0,
+              lastUsed: data.lastUsed || null
+            });
+          } catch (e) {
+            devices.push({
+              code: key.name,
+              businessName: "Error",
+              status: "error",
+              scans: 0,
+              lastUsed: null
+            });
+          }
         }
       }
+
+      devices.sort((a, b) => a.code.localeCompare(b.code));
+
+      return new Response(adminListPage(devices), {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    } catch (e) {
+      return new Response(errorPage("Error al cargar lista: " + e.message), {
+        status: 500,
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
     }
-
-    devices.sort((a, b) => a.code.localeCompare(b.code));
-
-    return new Response(adminListPage(devices), {
-      headers: { "Content-Type": "text/html; charset=utf-8" }
-    });
   }
 
-  return Response.redirect("/admin", 302);
+  return new Response(null, {
+    status: 302,
+    headers: { "Location": origin + "/admin" }
+  });
 }
 
 // ==================== PAGES ====================
