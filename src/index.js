@@ -74,7 +74,6 @@ async function handleAdmin(request, env, path) {
   const isLoggedIn = cookie.includes("breto_admin=1");
   const origin = new URL(request.url).origin;
 
-  // Logout
   if (path === "/admin/logout") {
     return new Response(null, {
       status: 302,
@@ -85,7 +84,6 @@ async function handleAdmin(request, env, path) {
     });
   }
 
-  // Login POST
   if (path === "/admin" && request.method === "POST") {
     try {
       const form = await request.formData();
@@ -126,7 +124,7 @@ async function handleAdmin(request, env, path) {
     });
   }
 
-  // ========== CREATE NEW DEVICE ==========
+  // Create new device
   if (path === "/admin/new" && request.method === "POST") {
     try {
       const form = await request.formData();
@@ -135,7 +133,7 @@ async function handleAdmin(request, env, path) {
       if (!newCode) {
         return new Response(null, {
           status: 302,
-          headers: { "Location": origin + "/admin" }
+          headers: { "Location": origin + "/admin/dispositivos" }
         });
       }
 
@@ -150,14 +148,11 @@ async function handleAdmin(request, env, path) {
         }));
       }
 
-      // Redirect limpio (absoluto) para evitar Error 1101
       return new Response(null, {
         status: 302,
         headers: { "Location": origin + "/admin/edit/" + newCode }
       });
-
     } catch (e) {
-      console.error("Create device error:", e);
       return new Response(errorPage("Error al crear dispositivo: " + e.message), {
         status: 500,
         headers: { "Content-Type": "text/html; charset=utf-8" }
@@ -165,7 +160,7 @@ async function handleAdmin(request, env, path) {
     }
   }
 
-  // ========== SAVE EDIT ==========
+  // Save edit
   if (path.startsWith("/admin/edit/") && request.method === "POST") {
     try {
       const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
@@ -177,11 +172,7 @@ async function handleAdmin(request, env, path) {
       let data = {};
 
       if (existingRaw) {
-        try {
-          data = JSON.parse(existingRaw);
-        } catch (e) {
-          data = {};
-        }
+        try { data = JSON.parse(existingRaw); } catch (e) { data = {}; }
       }
 
       data.businessName = businessName || null;
@@ -192,14 +183,11 @@ async function handleAdmin(request, env, path) {
 
       await env.DEVICES.put(deviceCode, JSON.stringify(data));
 
-      // Redirect limpio (absoluto) para evitar Error 1101
       return new Response(null, {
         status: 302,
-        headers: { "Location": origin + "/admin" }
+        headers: { "Location": origin + "/admin/dispositivos" }
       });
-
     } catch (e) {
-      console.error("Save device error:", e);
       return new Response(errorPage("Error al guardar: " + e.message), {
         status: 500,
         headers: { "Content-Type": "text/html; charset=utf-8" }
@@ -207,32 +195,28 @@ async function handleAdmin(request, env, path) {
     }
   }
 
-  // Edit form (GET)
+  // Edit form
   if (path.startsWith("/admin/edit/")) {
     const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
     const raw = await env.DEVICES.get(deviceCode);
     let data = { businessName: "", reviewUrl: "", status: "pending", scans: 0 };
-
     if (raw) {
-      try {
-        data = { ...data, ...JSON.parse(raw) };
-      } catch (e) {}
+      try { data = { ...data, ...JSON.parse(raw) }; } catch (e) {}
     }
-
     return new Response(editFormPage(deviceCode, data), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // New device page (GET)
+  // New device page
   if (path === "/admin/new") {
     return new Response(newDevicePage(), {
       headers: { "Content-Type": "text/html; charset=utf-8" }
     });
   }
 
-  // Device list
-  if (path === "/admin") {
+  // Dispositivos list
+  if (path === "/admin/dispositivos" || path === "/admin") {
     try {
       const list = await env.DEVICES.list();
       const devices = [];
@@ -250,13 +234,7 @@ async function handleAdmin(request, env, path) {
               lastUsed: data.lastUsed || null
             });
           } catch (e) {
-            devices.push({
-              code: key.name,
-              businessName: "Error",
-              status: "error",
-              scans: 0,
-              lastUsed: null
-            });
+            devices.push({ code: key.name, businessName: "Error", status: "error", scans: 0, lastUsed: null });
           }
         }
       }
@@ -274,10 +252,92 @@ async function handleAdmin(request, env, path) {
     }
   }
 
+  // Inicio (dashboard)
+  if (path === "/admin/inicio") {
+    return new Response(adminHomePage(), {
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  }
+
+  // Placeholder pages
+  const placeholders = ["clientes", "pedidos", "packs", "comprar", "tarifas", "contacto"];
+  for (const p of placeholders) {
+    if (path === "/admin/" + p) {
+      return new Response(placeholderPage(p), {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+  }
+
   return new Response(null, {
     status: 302,
-    headers: { "Location": origin + "/admin" }
+    headers: { "Location": origin + "/admin/dispositivos" }
   });
+}
+
+// ==================== SIDEBAR ====================
+
+function sidebar(active = "dispositivos") {
+  const items = [
+    { id: "inicio", label: "Inicio", href: "/admin/inicio", icon: "⌂" },
+    { id: "dispositivos", label: "Dispositivos", href: "/admin/dispositivos", icon: "▦" },
+    { id: "clientes", label: "Clientes", href: "/admin/clientes", icon: "☺", soon: true },
+    { id: "pedidos", label: "Pedidos", href: "/admin/pedidos", icon: "☰", soon: true },
+    { id: "packs", label: "Packs", href: "/admin/packs", icon: "▣", soon: true },
+    { id: "comprar", label: "Comprar", href: "/admin/comprar", icon: "₱", soon: true },
+    { id: "tarifas", label: "Tarifas", href: "/admin/tarifas", icon: "₱", soon: true },
+    { id: "contacto", label: "Contacto", href: "/admin/contacto", icon: "✉", soon: true }
+  ];
+
+  return `
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <img src="https://i.imgur.com/eHCpKk8.png" alt="Breto's Services">
+    </div>
+    <nav class="sidebar-nav">
+      ${items.map(item => `
+        <a href="${item.href}" class="nav-item ${active === item.id ? 'active' : ''} ${item.soon ? 'soon' : ''}">
+          <span class="nav-icon">${item.icon}</span>
+          <span class="nav-label">${item.label}</span>
+          ${item.soon ? '<span class="badge-soon">Próximamente</span>' : ''}
+        </a>
+      `).join('')}
+    </nav>
+    <div class="sidebar-footer">
+      <a href="/admin/logout" class="logout-btn">Cerrar sesión</a>
+    </div>
+  </aside>`;
+}
+
+function layoutStyles() {
+  return `
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;display:flex}
+    .sidebar{width:240px;background:#1e293b;display:flex;flex-direction:column;border-right:1px solid #334155;position:fixed;height:100vh;overflow-y:auto}
+    .sidebar-brand{padding:20px;text-align:center;border-bottom:1px solid #334155}
+    .sidebar-brand img{max-width:140px}
+    .sidebar-nav{flex:1;padding:16px 12px}
+    .nav-item{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;color:#94a3b8;text-decoration:none;font-size:.95rem;margin-bottom:4px;transition:all .15s}
+    .nav-item:hover{background:#334155;color:#f8fafc}
+    .nav-item.active{background:#0f172a;color:#38bdf8;font-weight:600}
+    .nav-item.soon{opacity:.55;pointer-events:none}
+    .nav-icon{font-size:1.1rem;width:22px;text-align:center}
+    .badge-soon{margin-left:auto;font-size:.65rem;background:#334155;color:#94a3b8;padding:2px 7px;border-radius:8px}
+    .sidebar-footer{padding:16px;border-top:1px solid #334155}
+    .logout-btn{display:block;text-align:center;color:#94a3b8;text-decoration:none;font-size:.9rem;padding:10px;border-radius:8px}
+    .logout-btn:hover{background:#334155;color:#f8fafc}
+    .main{margin-left:240px;flex:1;padding:28px;min-height:100vh}
+    .card{background:#1e293b;border-radius:16px;padding:24px;overflow-x:auto}
+    h1{font-size:1.4rem;margin-bottom:20px}
+    @media(max-width:768px){
+      .sidebar{width:100%;height:auto;position:relative;border-right:none}
+      body{flex-direction:column}
+      .main{margin-left:0;padding:16px}
+      .sidebar-nav{display:flex;flex-wrap:wrap;gap:4px;padding:12px}
+      .nav-item{flex:1 1 45%;justify-content:center;font-size:.85rem}
+      .badge-soon{display:none}
+    }
+  `;
 }
 
 // ==================== PAGES ====================
@@ -316,6 +376,29 @@ function loginPage(error = false, customMessage = null) {
 </html>`;
 }
 
+function adminHomePage() {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inicio – Breto's Services</title>
+  <style>${layoutStyles()}</style>
+</head>
+<body>
+  ${sidebar("inicio")}
+  <main class="main">
+    <div class="card">
+      <h1>Inicio</h1>
+      <p style="color:#94a3b8;line-height:1.6">Bienvenido al panel de Breto's Services.</p>
+      <p style="color:#94a3b8;margin-top:12px;line-height:1.6">Desde aquí puedes gestionar tus dispositivos NFC/QR de reseñas Google.</p>
+      <a href="/admin/dispositivos" style="display:inline-block;margin-top:24px;padding:12px 20px;background:#38bdf8;color:#0f172a;text-decoration:none;border-radius:10px;font-weight:600">Ir a Dispositivos</a>
+    </div>
+  </main>
+</body>
+</html>`;
+}
+
 function adminListPage(devices) {
   const rows = devices.length === 0
     ? `<tr><td colspan="6" style="text-align:center;padding:40px;color:#94a3b8">No hay dispositivos todavía</td></tr>`
@@ -336,15 +419,7 @@ function adminListPage(devices) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dispositivos – Breto's Services</title>
   <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;padding:24px}
-    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;max-width:1000px;margin-left:auto;margin-right:auto}
-    .logo{max-width:140px}
-    .logout{color:#94a3b8;text-decoration:none;font-size:.9rem}
-    .card{background:#1e293b;border-radius:16px;padding:24px;max-width:1000px;margin:0 auto;overflow-x:auto}
-    h1{font-size:1.3rem;margin-bottom:16px}
-    .top-actions{margin-bottom:20px}
-    .btn-new{display:inline-block;padding:10px 18px;background:#38bdf8;color:#0f172a;text-decoration:none;border-radius:10px;font-weight:600;font-size:.9rem}
+    ${layoutStyles()}
     table{width:100%;border-collapse:collapse;font-size:.9rem}
     th,td{padding:12px 10px;text-align:left;border-bottom:1px solid #334155}
     th{color:#94a3b8;font-weight:600;font-size:.8rem;text-transform:uppercase}
@@ -352,32 +427,62 @@ function adminListPage(devices) {
     .badge.ok{background:#065f46;color:#6ee7b7}
     .badge.pending{background:#713f12;color:#fcd34d}
     .btn{display:inline-block;padding:6px 12px;background:#38bdf8;color:#0f172a;text-decoration:none;border-radius:8px;font-size:.8rem;font-weight:600}
+    .btn-new{display:inline-block;padding:10px 18px;background:#38bdf8;color:#0f172a;text-decoration:none;border-radius:10px;font-weight:600;font-size:.9rem;margin-bottom:20px}
   </style>
 </head>
 <body>
-  <div class="header">
-    <img src="https://i.imgur.com/eHCpKk8.png" class="logo">
-    <a href="/admin/logout" class="logout">Cerrar sesión</a>
-  </div>
-  <div class="card">
-    <h1>Dispositivos</h1>
-    <div class="top-actions">
+  ${sidebar("dispositivos")}
+  <main class="main">
+    <div class="card">
+      <h1>Dispositivos</h1>
       <a href="/admin/new" class="btn-new">+ Nuevo dispositivo</a>
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Negocio</th>
+            <th>Estado</th>
+            <th>Escaneos</th>
+            <th>Último uso</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th>Código</th>
-          <th>Negocio</th>
-          <th>Estado</th>
-          <th>Escaneos</th>
-          <th>Último uso</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>
+  </main>
+</body>
+</html>`;
+}
+
+function placeholderPage(section) {
+  const titles = {
+    clientes: "Clientes",
+    pedidos: "Pedidos",
+    packs: "Packs",
+    comprar: "Comprar",
+    tarifas: "Tarifas",
+    contacto: "Contacto"
+  };
+  const title = titles[section] || section;
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${title} – Breto's Services</title>
+  <style>${layoutStyles()}</style>
+</head>
+<body>
+  ${sidebar(section)}
+  <main class="main">
+    <div class="card" style="text-align:center;padding:60px 24px">
+      <h1>${title}</h1>
+      <p style="color:#94a3b8;margin-top:12px;font-size:1.05rem">Próximamente</p>
+      <p style="color:#64748b;margin-top:8px;font-size:.9rem">Esta sección estará disponible en una próxima actualización.</p>
+    </div>
+  </main>
 </body>
 </html>`;
 }
@@ -390,13 +495,7 @@ function newDevicePage() {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Nuevo dispositivo – Breto's Services</title>
   <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;padding:24px}
-    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px;max-width:480px;margin-left:auto;margin-right:auto}
-    .logo{max-width:130px}
-    .back{color:#94a3b8;text-decoration:none;font-size:.9rem}
-    .card{background:#1e293b;border-radius:16px;padding:32px;max-width:480px;margin:0 auto}
-    h1{font-size:1.3rem;margin-bottom:24px}
+    ${layoutStyles()}
     label{display:block;font-size:.9rem;color:#94a3b8;margin-bottom:6px}
     input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#f8fafc;font-size:1rem;margin-bottom:20px}
     input:focus{outline:none;border-color:#38bdf8}
@@ -405,19 +504,18 @@ function newDevicePage() {
   </style>
 </head>
 <body>
-  <div class="header">
-    <img src="https://i.imgur.com/eHCpKk8.png" class="logo">
-    <a href="/admin" class="back">← Volver</a>
-  </div>
-  <div class="card">
-    <h1>Nuevo dispositivo</h1>
-    <form method="POST" action="/admin/new">
-      <label>Código del dispositivo</label>
-      <input type="text" name="code" placeholder="Ej: BS011" required autofocus style="text-transform:uppercase">
-      <p class="hint">Usa el formato BS001, BS002, etc.</p>
-      <button type="submit">Crear y configurar</button>
-    </form>
-  </div>
+  ${sidebar("dispositivos")}
+  <main class="main">
+    <div class="card" style="max-width:480px">
+      <h1>Nuevo dispositivo</h1>
+      <form method="POST" action="/admin/new">
+        <label>Código del dispositivo</label>
+        <input type="text" name="code" placeholder="Ej: BS011" required autofocus style="text-transform:uppercase">
+        <p class="hint">Usa el formato BS001, BS002, etc.</p>
+        <button type="submit">Crear y configurar</button>
+      </form>
+    </div>
+  </main>
 </body>
 </html>`;
 }
@@ -430,19 +528,13 @@ function editFormPage(code, data) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Configurar ${code}</title>
   <style>
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;min-height:100vh;padding:24px}
-    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px;max-width:520px;margin-left:auto;margin-right:auto}
-    .logo{max-width:130px}
-    .back{color:#94a3b8;text-decoration:none;font-size:.9rem}
-    .card{background:#1e293b;border-radius:16px;padding:32px;max-width:520px;margin:0 auto}
-    h1{font-size:1.3rem;margin-bottom:6px}
-    .code{font-size:1.1rem;color:#38bdf8;font-weight:700;letter-spacing:1px;margin-bottom:24px}
+    ${layoutStyles()}
     label{display:block;font-size:.9rem;color:#94a3b8;margin-bottom:6px}
     input,textarea{width:100%;padding:12px 14px;border-radius:10px;border:1px solid #334155;background:#0f172a;color:#f8fafc;font-size:1rem;margin-bottom:18px}
     input:focus,textarea:focus{outline:none;border-color:#38bdf8}
     textarea{min-height:90px;resize:vertical}
     .hint{font-size:.8rem;color:#64748b;margin-top:-12px;margin-bottom:20px}
+    .code{font-size:1.1rem;color:#38bdf8;font-weight:700;letter-spacing:1px;margin-bottom:24px}
     .actions{display:flex;gap:12px}
     button,.btn-cancel{flex:1;padding:14px;border:none;border-radius:10px;font-size:1rem;font-weight:600;cursor:pointer;text-align:center;text-decoration:none}
     button{background:#38bdf8;color:#0f172a}
@@ -450,25 +542,24 @@ function editFormPage(code, data) {
   </style>
 </head>
 <body>
-  <div class="header">
-    <img src="https://i.imgur.com/eHCpKk8.png" class="logo">
-    <a href="/admin" class="back">← Volver</a>
-  </div>
-  <div class="card">
-    <h1>Configurar dispositivo</h1>
-    <div class="code">${code}</div>
-    <form method="POST" action="/admin/edit/${code}">
-      <label>Nombre del negocio</label>
-      <input type="text" name="businessName" value="${data.businessName || ''}" placeholder="Ej: Peluquería La Pelu" required>
-      <label>Link de reseña de Google</label>
-      <textarea name="reviewUrl" placeholder="https://search.google.com/local/writereview?placeid=...">${data.reviewUrl || ''}</textarea>
-      <p class="hint">Pega el link completo de "Escribir una reseña"</p>
-      <div class="actions">
-        <a href="/admin" class="btn-cancel">Cancelar</a>
-        <button type="submit">Guardar</button>
-      </div>
-    </form>
-  </div>
+  ${sidebar("dispositivos")}
+  <main class="main">
+    <div class="card" style="max-width:520px">
+      <h1>Configurar dispositivo</h1>
+      <div class="code">${code}</div>
+      <form method="POST" action="/admin/edit/${code}">
+        <label>Nombre del negocio</label>
+        <input type="text" name="businessName" value="${data.businessName || ''}" placeholder="Ej: Peluquería La Pelu" required>
+        <label>Link de reseña de Google</label>
+        <textarea name="reviewUrl" placeholder="https://search.google.com/local/writereview?placeid=...">${data.reviewUrl || ''}</textarea>
+        <p class="hint">Pega el link completo de "Escribir una reseña"</p>
+        <div class="actions">
+          <a href="/admin/dispositivos" class="btn-cancel">Cancelar</a>
+          <button type="submit">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </main>
 </body>
 </html>`;
 }
