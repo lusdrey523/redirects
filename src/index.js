@@ -62,6 +62,63 @@ export default {
   }
 };
 
+
+function escapeHtml(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function sanitizeText(str, maxLen = 120) {
+  if (str == null) return "";
+  return String(str).trim().slice(0, maxLen);
+}
+
+function isValidHttpsUrl(str) {
+  if (!str || typeof str !== "string") return false;
+  const s = str.trim();
+  if (s.length < 12 || s.length > 500) return false;
+  if (!/^https:\/\//i.test(s)) return false;
+  try {
+    const u = new URL(s);
+    return u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function isValidDeviceCode(code) {
+  return typeof code === "string" && /^[A-Z0-9_-]{3,20}$/.test(code);
+}
+
+function sameOrigin(request, expectedOrigin) {
+  const origin = request.headers.get("Origin");
+  const referer = request.headers.get("Referer");
+  if (origin) return origin === expectedOrigin;
+  if (referer) {
+    try {
+      return new URL(referer).origin === expectedOrigin;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function securityHeaders(extra = {}) {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Cache-Control": "no-store, max-age=0",
+    ...extra
+  };
+}
+
 async function handleAdmin(request, env, path, url) {
   const cookie = request.headers.get("Cookie") || "";
   const isLoggedIn = cookie.includes("breto_admin=1");
@@ -84,7 +141,7 @@ async function handleAdmin(request, env, path, url) {
       if (!env.ADMIN_PASSWORD) {
         return new Response(loginPage(true, "ADMIN_PASSWORD no configurado"), {
           status: 500,
-          headers: { "Content-Type": "text/html; charset=utf-8" }
+          headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
         });
       }
       if (password === env.ADMIN_PASSWORD) {
@@ -92,25 +149,27 @@ async function handleAdmin(request, env, path, url) {
           status: 302,
           headers: {
             "Location": origin + "/admin/inicio",
-            "Set-Cookie": "breto_admin=1; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400"
+            "Set-Cookie": "breto_admin=1; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=86400",
+            ...securityHeaders()
           }
         });
       }
+      await new Promise(r => setTimeout(r, 800));
       return new Response(loginPage(true), {
         status: 401,
-        headers: { "Content-Type": "text/html; charset=utf-8" }
+        headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
       });
     } catch (e) {
       return new Response(loginPage(true, "Error al procesar login"), {
         status: 500,
-        headers: { "Content-Type": "text/html; charset=utf-8" }
+        headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
       });
     }
   }
 
   if (!isLoggedIn) {
     return new Response(loginPage(false), {
-      headers: { "Content-Type": "text/html; charset=utf-8" }
+      headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
     });
   }
 
@@ -123,28 +182,40 @@ async function handleAdmin(request, env, path, url) {
 
   if (path.startsWith("/admin/delete/") && request.method === "POST") {
     try {
+      if (!sameOrigin(request, origin)) {
+        return new Response("Forbidden", { status: 403, headers: securityHeaders() });
+      }
       const deviceCode = path.replace("/admin/delete/", "").toUpperCase();
+      if (!isValidDeviceCode(deviceCode)) {
+        return new Response(errorPage("Código de dispositivo inválido"), {
+          status: 400,
+          headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
+        });
+      }
       await env.DEVICES.delete(deviceCode);
       return new Response(null, {
         status: 302,
-        headers: { "Location": origin + "/admin/dispositivos?msg=deleted" }
+        headers: { "Location": origin + "/admin/dispositivos?msg=deleted", ...securityHeaders() }
       });
     } catch (e) {
-      return new Response(errorPage("Error al eliminar: " + e.message), {
+      return new Response(errorPage("Error al eliminar"), {
         status: 500,
-        headers: { "Content-Type": "text/html; charset=utf-8" }
+        headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
       });
     }
   }
 
   if (path === "/admin/new" && request.method === "POST") {
     try {
+      if (!sameOrigin(request, origin)) {
+        return new Response("Forbidden", { status: 403, headers: securityHeaders() });
+      }
       const form = await request.formData();
       const newCode = (form.get("code") || "").toUpperCase().trim();
-      if (!newCode) {
-        return new Response(null, {
-          status: 302,
-          headers: { "Location": origin + "/admin/dispositivos" }
+      if (!isValidDeviceCode(newCode)) {
+        return new Response(errorPage("Código inválido. Use 3-20 caracteres: A-Z, 0-9, _ o -"), {
+          status: 400,
+          headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
         });
       }
       const exists = await env.DEVICES.get(newCode);
@@ -160,35 +231,46 @@ async function handleAdmin(request, env, path, url) {
       }
       return new Response(null, {
         status: 302,
-        headers: { "Location": origin + "/admin/edit/" + newCode + "?msg=created" }
+        headers: { "Location": origin + "/admin/edit/" + newCode + "?msg=created", ...securityHeaders() }
       });
     } catch (e) {
-      return new Response(errorPage("Error al crear: " + e.message), {
+      return new Response(errorPage("Error al crear"), {
         status: 500,
-        headers: { "Content-Type": "text/html; charset=utf-8" }
+        headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
       });
     }
   }
 
   if (path.startsWith("/admin/edit/") && request.method === "POST") {
     try {
+      if (!sameOrigin(request, origin)) {
+        return new Response("Forbidden", { status: 403, headers: securityHeaders() });
+      }
       const deviceCode = path.replace("/admin/edit/", "").toUpperCase();
+      if (!isValidDeviceCode(deviceCode)) {
+        return new Response(errorPage("Código de dispositivo inválido"), {
+          status: 400,
+          headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
+        });
+      }
       const form = await request.formData();
-      const businessName = (form.get("businessName") || "").trim();
-      const reviewUrl = (form.get("reviewUrl") || "").trim();
+      const businessName = sanitizeText(form.get("businessName"), 120);
+      const reviewUrlRaw = sanitizeText(form.get("reviewUrl"), 500);
+      const validUrl = isValidHttpsUrl(reviewUrlRaw);
+
       const existingRaw = await env.DEVICES.get(deviceCode);
       let data = {};
       if (existingRaw) {
         try { data = JSON.parse(existingRaw); } catch (e) { data = {}; }
       }
       data.businessName = businessName || null;
-      data.reviewUrl = reviewUrl || null;
-      data.status = reviewUrl ? "configured" : "pending";
+      data.reviewUrl = validUrl ? reviewUrlRaw : (reviewUrlRaw || null);
+      data.status = validUrl ? "configured" : "pending";
       data.updatedAt = new Date().toISOString();
       if (typeof data.scans !== "number") data.scans = 0;
       if (!Array.isArray(data.history)) data.history = [];
       data.history.push({
-        action: reviewUrl ? "configured" : "updated",
+        action: validUrl ? "configured" : "updated",
         businessName,
         at: new Date().toISOString()
       });
@@ -196,12 +278,12 @@ async function handleAdmin(request, env, path, url) {
       await env.DEVICES.put(deviceCode, JSON.stringify(data));
       return new Response(null, {
         status: 302,
-        headers: { "Location": origin + "/admin/dispositivos?msg=saved" }
+        headers: { "Location": origin + "/admin/dispositivos?msg=saved", ...securityHeaders() }
       });
     } catch (e) {
-      return new Response(errorPage("Error al guardar: " + e.message), {
+      return new Response(errorPage("Error al guardar"), {
         status: 500,
-        headers: { "Content-Type": "text/html; charset=utf-8" }
+        headers: { "Content-Type": "text/html; charset=utf-8", ...securityHeaders() }
       });
     }
   }
@@ -548,18 +630,20 @@ function editFormPage(code, data, origin, msg) {
   const shortUrl = origin + "/" + code;
   const qrUrl = "https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=" + encodeURIComponent(shortUrl);
   const history = Array.isArray(data.history) ? data.history.slice().reverse() : [];
-  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Configurar ${code}</title><style>${baseStyles()}</style></head><body>
+  const safeName = escapeHtml(data.businessName || "");
+  const safeUrl = escapeHtml(data.reviewUrl || "");
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Configurar ${escapeHtml(code)}</title><style>${baseStyles()}</style></head><body>
 ${sidebar("dispositivos")}<main class="main"><div class="main-content">
-<div class="page-header"><h1>Configurar dispositivo</h1><p class="code-tag">${code}</p></div>
+<div class="page-header"><h1>Configurar dispositivo</h1><p class="code-tag">${escapeHtml(code)}</p></div>
 ${flashMsg(msg)}
 <div class="card" style="max-width:520px">
-<form method="POST" action="/admin/edit/${code}">
+<form method="POST" action="/admin/edit/${encodeURIComponent(code)}">
 <label>Nombre del negocio</label>
-<input type="text" name="businessName" id="businessName" value="${data.businessName || ''}" placeholder="Ej: Peluquería La Pelu" required>
+<input type="text" name="businessName" id="businessName" value="${safeName}" placeholder="Ej: Peluquería La Pelu" maxlength="120" required>
 <div class="actions" style="margin-bottom:16px">
 <button type="button" class="btn btn-ghost btn-sm" onclick="var n=document.getElementById('businessName').value.trim();if(n)window.open('https://www.google.com/maps/search/'+encodeURIComponent(n),'_blank');else alert('Escribe primero el nombre del negocio');">Buscar en Google Maps</button></div>
 <label>Link de reseña de Google</label>
-<textarea name="reviewUrl" placeholder="https://search.google.com/local/writereview?placeid=...">${data.reviewUrl || ''}</textarea>
+<textarea name="reviewUrl" maxlength="500" placeholder="https://search.google.com/local/writereview?placeid=...">${safeUrl}</textarea>
 <p class="hint">1) Busca el negocio en Maps → 2) Copia el link de “Escribir una reseña” → 3) Pégalo aquí</p>
 <div class="actions"><a href="/admin/dispositivos" class="btn btn-ghost" style="flex:1">Cancelar</a>
 <button type="submit" class="btn btn-primary" style="flex:1">Guardar</button></div></form>

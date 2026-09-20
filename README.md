@@ -1,59 +1,29 @@
-# redirects — Breto's Services
+# redirects
 
-Cloudflare Worker que resuelve el enlace físico (NFC + QR) de las tarjetas de reseñas Google hacia el perfil correcto del negocio.
+Cloudflare Worker que resuelve el enlace NFC/QR de las tarjetas físicas hacia la URL de reseñas de Google del negocio.
 
-## Qué es un Device
+## Flujo
 
-Un **device** es una tarjeta física (PVC) con chip NFC + código QR.  
-Cada tarjeta tiene un código corto (ejemplo: `ABC123`) grabado en el NFC y en el QR.
-
-### Flujo real
-
-1. El cliente acerca el teléfono a la tarjeta (NFC) o escanea el QR.
-2. El teléfono abre `https://[dominio]/[CODIGO]`.
+1. El cliente acerca el teléfono o escanea el QR de la tarjeta.
+2. Se abre `https://[dominio]/[CODIGO]`.
 3. El Worker busca el código en el KV `DEVICES`.
-4. Si el dispositivo está `configured` y tiene una `reviewUrl` válida → redirige 302 a la URL de reseñas de Google.
-5. Si no está configurado → muestra página de “tarjeta no configurada”.
+4. Si está configurado con una URL válida → redirige 302.
+5. Si no → muestra página de tarjeta no configurada.
 
-## Estados de un dispositivo
+## Estados
 
-| Estado       | Significado                                      |
-|--------------|--------------------------------------------------|
-| `pending`    | Creado, todavía no tiene URL de reseñas válida |
-| `configured` | Tiene `reviewUrl` https válida y lista para uso  |
+- `pending` — creado, sin URL de reseñas válida
+- `configured` — tiene URL `https` válida
 
-## Datos guardados por dispositivo
+## Datos por dispositivo
 
-- `status`
-- `businessName`
-- `reviewUrl`
-- `scans` (contador de usos)
-- `lastUsed`
-- `createdAt` / `updatedAt`
-- `history` (últimas 20 acciones)
+- `status`, `businessName`, `reviewUrl`, `scans`, `lastUsed`, `createdAt`, `updatedAt`, `history`
 
-## Variables de entorno / bindings necesarios
+## Bindings necesarios
 
-- Binding KV: `DEVICES`
-- `ADMIN_PASSWORD` (solo para acceso al panel)
+- KV: `DEVICES`
+- Variable: `ADMIN_PASSWORD`
 
-## Archivos de diseño
+## Diseño físico
 
-El archivo `Base PVC.png` es el diseño físico de la tarjeta.  
-Se recomienda moverlo a una carpeta `assets/` para no mezclar material de impresión con el código del Worker.
-
-## Qué está implementado vs. conceptual
-
-| Elemento                              | Estado        |
-|---------------------------------------|---------------|
-| Redirect NFC/QR → Google Reviews      | Implementado  |
-| Gestión de dispositivos (CRUD básico) | Implementado  |
-| Contador de escaneos                  | Implementado  |
-| Export CSV                            | Implementado  |
-| CRM de prospectos                     | No construido |
-| Línea B (tarjeta de contacto digital) | No construido |
-| Pedidos / pagos / producción          | No construido |
-
----
-
-Documentación operativa interna y arquitectura completa (SIP-SOE, RMHE, MEC, etc.) se mantiene en Google Drive, no en este repositorio.
+El archivo de diseño de la tarjeta está en `assets/`.
