@@ -4,6 +4,11 @@ export default {
     const path = url.pathname;
     const code = path.slice(1).toUpperCase().trim();
 
+    // === API para Capa 2 ===
+    if (path.startsWith("/api/")) {
+      return handleApi(request, env, path, url);
+    }
+
     if (path.startsWith("/admin")) {
       return handleAdmin(request, env, path, url);
     }
@@ -728,4 +733,245 @@ function errorPage(message = "Error temporal") {
 <div class="err-card"><img src="https://i.imgur.com/eHCpKk8.png" alt="Breto's Services">
 <h1>Error temporal</h1><p>${message}</p><p style="margin-top:12px">Intenta de nuevo en unos segundos.</p></div>
 ${siteFooter()}</body></html>`;
+}
+
+// ===================== API Capa 2 =====================
+
+async function handleApi(request, env, path, url) {
+  // 1. Autenticación
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+
+  if (!env.API_TOKEN || token !== env.API_TOKEN) {
+    return jsonResponse({ ok: false, error: "Unauthorized", code: "UNAUTHORIZED" }, 401);
+  }
+
+  const method = request.method;
+
+  // GET /api/stats
+  if (path === "/api/stats" && method === "GET") {
+    try {
+      const list = await env.DEVICES.list();
+      let total = 0, configured = 0, pending = 0, totalScans = 0;
+
+      for (const key of list.keys) {
+        total++;
+        const raw = await env.DEVICES.get(key.name);
+        if (raw) {
+          try {
+            const d = JSON.parse(raw);
+            if (d.status === "configured") configured++;
+            else pending++;
+            totalScans += Number(d.scans) || 0;
+          } catch (e) {}
+        }
+      }
+
+      return jsonResponse({
+        ok: true,
+        data: { total, configured, pending, totalScans }
+      });
+    } catch (e) {
+      return jsonResponse({ ok: false, error: e.message, code: "INTERNAL" }, 500);
+    }
+  }
+
+  // GET /api/devices
+  if (path === "/api/devices" && method === "GET") {
+    try {
+      const list = await env.DEVICES.list();
+      const statusFilter = (url.searchParams.get("status") || "all").toLowerCase();
+      const q = (url.searchParams.get("q") || "").toLowerCase().trim();
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "100", 10), 200);
+
+      const devices = [];
+
+      for (const key of list.keys) {
+        const raw = await env.DEVICES.get(key.name);
+        if (!raw) continue;
+
+        try {
+          const d = JSON.parse(raw);
+          const item = {
+            code: key.name,
+            status: d.status || "pending",
+            businessName: d.businessName || null,
+            reviewUrl: d.reviewUrl || null,
+            scans: Number(d.scans) || 0,
+            lastUsed: d.lastUsed || null,
+            createdAt: d.createdAt || null,
+            updatedAt: d.updatedAt || null
+          };
+
+          if (statusFilter === "configured" && item.status !== "configured") continue;
+          if (statusFilter === "pending" && item.status === "configured") continue;
+
+          if (q) {
+            const match = item.code.toLowerCase().includes(q) ||
+                          (item.businessName || "").toLowerCase().includes(q);
+            if (!match) continue;
+          }
+
+          devices.push(item);
+        } catch (e) {}
+      }
+
+      devices.sort((a, b) => a.code.localeCompare(b.code));
+      const sliced = devices.slice(0, limit);
+
+      return jsonResponse({
+        ok: true,
+        data: sliced,
+        meta: { total: devices.length, returned: sliced.length }
+      });
+    } catch (e) {
+      return jsonResponse({ ok: false, error: e.message, code: "INTERNAL" }, 500);
+    }
+  }
+
+  // GET /api/devices/:code
+  if (path.startsWith("/api/devices/") && method === "GET") {
+    const deviceCode = path.replace("/api/devices/", "").toUpperCase().trim();
+    if (!isValidDeviceCode(deviceCode)) {
+      return jsonResponse({ ok: false, error: "Código inválido", code: "INVALID_CODE" }, 400);
+    }
+
+    const raw = await env.DEVICES.get(deviceCode);
+    if (!raw) {
+      return jsonResponse({ ok: false, error: "Dispositivo no encontrado", code: "NOT_FOUND" }, 404);
+    }
+
+    try {
+      const d = JSON.parse(raw);
+      return jsonResponse({
+        ok: true,
+        data: {
+          code: deviceCode,
+          status: d.status || "pending",
+          businessName: d.businessName || null,
+          reviewUrl: d.reviewUrl || null,
+          scans: Number(d.scans) || 0,
+          lastUsed: d.lastUsed || null,
+          createdAt: d.createdAt || null,
+          updatedAt: d.updatedAt || null
+        }
+      });
+    } catch (e) {
+      return jsonResponse({ ok: false, error: "Datos corruptos", code: "CORRUPT" }, 500);
+    }
+  }
+
+  // POST /api/devices  (crear)
+  if (path === "/api/devices" && method === "POST") {
+    try {
+      const body = await request.json();
+      const newCode = (body.code || "").toUpperCase().trim();
+
+      if (!isValidDeviceCode(newCode)) {
+        return jsonResponse({
+          ok: false,
+          error: "Código inválido. Use 3-20 caracteres: A-Z, 0-9, _ o -",
+          code: "INVALID_CODE"
+        }, 400);
+      }
+
+      const exists = await env.DEVICES.get(newCode);
+      if (exists) {
+        return jsonResponse({ ok: false, error: "El código ya existe", code: "ALREADY_EXISTS" }, 409);
+      }
+
+      const data = {
+        status: "pending",
+        businessName: null,
+        reviewUrl: null,
+        scans: 0,
+        createdAt: new Date().toISOString(),
+        history: [{ action: "created", at: new Date().toISOString() }]
+      };
+
+      await env.DEVICES.put(newCode, JSON.stringify(data));
+
+      return jsonResponse({
+        ok: true,
+        data: {
+          code: newCode,
+          status: "pending",
+          businessName: null,
+          reviewUrl: null,
+          scans: 0,
+          createdAt: data.createdAt
+        }
+      }, 201);
+    } catch (e) {
+      return jsonResponse({ ok: false, error: e.message, code: "INTERNAL" }, 500);
+    }
+  }
+
+  // PUT /api/devices/:code  (actualizar)
+  if (path.startsWith("/api/devices/") && method === "PUT") {
+    try {
+      const deviceCode = path.replace("/api/devices/", "").toUpperCase().trim();
+      if (!isValidDeviceCode(deviceCode)) {
+        return jsonResponse({ ok: false, error: "Código inválido", code: "INVALID_CODE" }, 400);
+      }
+
+      const body = await request.json();
+      const businessName = sanitizeText(body.businessName, 120);
+      const reviewUrlRaw = sanitizeText(body.reviewUrl, 500);
+      const validUrl = isValidHttpsUrl(reviewUrlRaw);
+
+      const existingRaw = await env.DEVICES.get(deviceCode);
+      let data = {};
+      if (existingRaw) {
+        try { data = JSON.parse(existingRaw); } catch (e) { data = {}; }
+      } else {
+        return jsonResponse({ ok: false, error: "Dispositivo no encontrado", code: "NOT_FOUND" }, 404);
+      }
+
+      data.businessName = businessName || null;
+      data.reviewUrl = validUrl ? reviewUrlRaw : (reviewUrlRaw || null);
+      data.status = validUrl ? "configured" : "pending";
+      data.updatedAt = new Date().toISOString();
+      if (typeof data.scans !== "number") data.scans = 0;
+      if (!Array.isArray(data.history)) data.history = [];
+
+      data.history.push({
+        action: validUrl ? "configured" : "updated",
+        businessName,
+        at: new Date().toISOString()
+      });
+      if (data.history.length > 20) data.history = data.history.slice(-20);
+
+      await env.DEVICES.put(deviceCode, JSON.stringify(data));
+
+      return jsonResponse({
+        ok: true,
+        data: {
+          code: deviceCode,
+          status: data.status,
+          businessName: data.businessName,
+          reviewUrl: data.reviewUrl,
+          scans: data.scans,
+          lastUsed: data.lastUsed || null,
+          createdAt: data.createdAt || null,
+          updatedAt: data.updatedAt
+        }
+      });
+    } catch (e) {
+      return jsonResponse({ ok: false, error: e.message, code: "INTERNAL" }, 500);
+    }
+  }
+
+  // Cualquier otra ruta de API
+  return jsonResponse({ ok: false, error: "Not Found", code: "NOT_FOUND" }, 404);
+}
+
+function jsonResponse(obj, status = 200) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
 }
