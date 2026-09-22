@@ -738,6 +738,11 @@ ${siteFooter()}</body></html>`;
 // ===================== API Capa 2 =====================
 
 async function handleApi(request, env, path, url) {
+  // Preflight CORS
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders() });
+  }
+
   // 1. Autenticación
   const auth = request.headers.get("Authorization") || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
@@ -966,12 +971,22 @@ async function handleApi(request, env, path, url) {
   return jsonResponse({ ok: false, error: "Not Found", code: "NOT_FOUND" }, 404);
 }
 
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "https://panel-bretos-services.pages.dev",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Max-Age": "86400"
+  };
+}
+
 function jsonResponse(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store"
+      "Cache-Control": "no-store",
+      ...corsHeaders()
     }
   });
 }
